@@ -1,0 +1,293 @@
+---
+title: "History of dominance hierarchy research - overall publication trends"
+author: "Liz Hobson (elizabeth.hobson@uc.edu)"
+output: 
+  html_document:
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: lumen
+pdf_document:
+    number_sections: true
+    toc: true
+    toc_depth: 3
+---
+
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 12px;
+  }
+td {  /* Table  */
+  font-size: 10px;
+}
+h1.title {
+  font-size: 20px;
+  color: Black;
+}
+h1 { /* Header 1 */
+  font-size: 18px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 16px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 14px;
+  color: DarkBlue;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 14px;
+}
+</style>
+
+# Load packages & functions
+```{r, echo=TRUE, results='hide'}
+library(tidyverse, warn.conflicts=F, quietly=T)
+library(gridExtra, warn.conflicts=F, quietly=T)
+library(quanteda, warn.conflicts=F, quietly=T)
+library(stringr, warn.conflicts=F, quietly=T)
+library(scales, warn.conflicts=F, quietly=T)
+library(kableExtra, warn.conflicts=F, quietly=T)
+
+
+# Function to convert to matrix format
+matrix.please <- function(x) {
+  m<-as.matrix(x[,-1])
+  rownames(m)<-x[,1]
+  m
+}
+```
+
+# Import data
+```{r, echo=TRUE, results='hide'}
+d <- read_csv("Data_raw.csv") #head(d)
+```
+
+
+## Add decade to data
+```{r}
+d$rounded.10yrs <- as.numeric(paste0(substr(d$year, 1, 3), 0))
+```
+
+# Overall summary
+There are `r length(unique(d$title))` unique papers in the full dataset. The earliest publication date is `r min(d$year, na.rm=TRUE)`. See below for all documents with a publication date prior to 1922.
+```{r, max.height='5px'}
+#view early papers
+early.papers <- subset(d, year<1922)
+
+early.papers.K <- early.papers %>%
+                    kbl() %>%
+                    kable_styling()
+
+scroll_box(
+  early.papers.K,
+  height = "400px", #width = "500px", height = "200px"
+  width = "800px",
+  box_css = "border: 1px solid #ddd; padding: 5px; ",
+  extra_css = NULL,
+  fixed_thead = TRUE
+)
+
+```
+
+## Subset to consider just papers after 1922
+Because we are concerned with papers published after the foundational dominance hierarchy paper (published in 1922), I included only documents with publication dates later than 1922. I also checked to make sure all documents had publication year data (no records returned = none missing year). I also checked that none were missing their titles.
+
+```{r}
+#subset data to just after 1922
+d.post1922 <- subset(d, year>1922)
+
+#check that none of the years are missing
+subset(d.post1922, is.na(year))
+
+#check that none of the titles are missing
+subset(d.post1922, is.na(title))
+
+# Summaries
+# Number unique paper titles after 1922 #length(unique(d.post1922$title))
+
+#First publication year after 1922 #min(d.post1922$year, na.rm=TRUE)
+```
+
+
+# Summarize annual publication amounts
+
+## Use compiled citation data to summarize and plot papers by year and citations to those papers by publication date.
+```{r}
+d.post1922_summXyear <- d.post1922 %>% group_by(year) %>% summarize(n.papersXyear=n(),
+                                                                  n.citestopaperXpubyr=sum(ECC),
+                                                                  n.citestopaperXpubyr_max=max(ECC),
+                                                                  n.citestopaperXpubyr_median=median(ECC))
+
+d.post1922_summXyear.K <- d.post1922_summXyear %>%
+                            kbl() %>%
+                            kable_styling()
+
+#view
+scroll_box(
+  d.post1922_summXyear.K,
+  height = "400px", #width = "500px", height = "200px"
+  width = "800px",
+  box_css = "border: 1px solid #ddd; padding: 5px; ",
+  extra_css = NULL,
+  fixed_thead = TRUE
+)
+
+```
+
+### Summary of publications per year 
+
+There are `r length(unique(d.post1922$title))` unique documents published after 1922 in the database. The earliest year of publication in the dataset is now `r min(d.post1922$year, na.rm=TRUE)`.
+
+The year with the most publications was `r d.post1922_summXyear$year[which.max(d.post1922_summXyear$n.papersXyear)]` which had a total of `r max(d.post1922_summXyear$n.papersXyear)`. The mean number of papers per year was `r round(mean(d.post1922_summXyear$n.papersXyear),2)` and the median number of papers per year was `r median(d.post1922_summXyear$n.papersXyear)`.
+
+
+## Use compiled citation data to summarize papers by decade
+```{r}
+d.post1922_summXdecade <- d.post1922 %>% group_by(rounded.10yrs) %>% summarize(n.papersXdecade=n(),
+                                                                  n.citestopaperXpubyr=sum(ECC),
+                                                                  n.citestopaperXpubyr_max=max(ECC),
+                                                                  n.citestopaperXpubyr_median=median(ECC))
+
+d.post1922_summXdecade.K <- d.post1922_summXdecade %>%
+                            kbl() %>%
+                            kable_styling()
+
+#view
+scroll_box(
+  d.post1922_summXdecade.K,
+  height = "400px", #width = "500px", height = "200px"
+  width = "800px",
+  box_css = "border: 1px solid #ddd; padding: 5px; ",
+  extra_css = NULL,
+  fixed_thead = TRUE
+)
+
+```
+
+## Add normalization to decadal summaries (+/- last decade's counts)
+Use lag( ) to compare each decade's number of publications to the number published in the previous decade. Find the difference in the numbers of papers (where positive = more papers published in one decade compared to the last and negative = publication numbers have decreased compared to previous decade). Find the percent growth rate for both the number of publications by decade and also citations to those papers by publication decade.
+```{r}
+d.post1922_summXdecade$lag.npapers <- lag(d.post1922_summXdecade$n.papersXdecade)
+d.post1922_summXdecade$lag.ncitesXpubyr <- lag(d.post1922_summXdecade$n.citestopaperXpubyr)
+
+d.post1922_summXdecade$diff.npapers <- d.post1922_summXdecade$n.papersXdecade - d.post1922_summXdecade$lag.npapers
+d.post1922_summXdecade$diff.ncitesXpubyr <- d.post1922_summXdecade$n.citestopaperXpubyr - d.post1922_summXdecade$lag.ncitesXpubyr
+
+d.post1922_summXdecade$DoD.npaper.growth <- (d.post1922_summXdecade$diff.npapers/d.post1922_summXdecade$lag.npapers) *100
+d.post1922_summXdecade$DoD.ncitesXpubyr.growth <- (d.post1922_summXdecade$diff.ncitesXpubyr/d.post1922_summXdecade$lag.ncitesXpubyr) *100
+
+#view
+#d.post1922_summXdecade
+
+d.post1922_summXdecade.K <- d.post1922_summXdecade %>%
+                            kbl() %>%
+                            kable_styling()
+
+#view
+scroll_box(
+  d.post1922_summXdecade.K,
+  height = "400px", #width = "500px", height = "200px"
+  width = "800px",
+  box_css = "border: 1px solid #ddd; padding: 5px; ",
+  extra_css = NULL,
+  fixed_thead = TRUE
+)
+```
+
+## Number of papers published by decade
+Compared to the previous decade, how many more papers have been published? This approach helps to control for changes in overall publication patterns, so we are not comparing publication numbers in 2010s to those in 1930s for example. I removed papers published in the 2020s because we don't have enough data yet for it to make sense to compare to 2010s.
+
+```{r}
+#remove 2020s publication dates
+d.post1922_summXdecade.no2020 <- subset(d.post1922_summXdecade, rounded.10yrs!="2020")
+
+d.post1922_summXdecade.no2020.K <- d.post1922_summXdecade.no2020 %>%
+                            kbl() %>%
+                            kable_styling()
+
+#view
+scroll_box(
+  d.post1922_summXdecade.no2020.K,
+  height = "400px", #width = "500px", height = "200px"
+  width = "800px",
+  box_css = "border: 1px solid #ddd; padding: 5px; ",
+  extra_css = NULL,
+  fixed_thead = TRUE
+)
+
+```
+
+### View simplified dataframe of decadal publication data with data from plots
+This dataframe shows the number of papers published by decade (n.papersXdecade), the difference in the number of papers published in each decade compared to the previous decade (diff.npapers), and the decade over decade percent growth in the number of papers published (DoD.npaper.growth). 
+```{r}
+d.post1922_summXdecade.no2020.tr <- subset(d.post1922_summXdecade.no2020, select=c(rounded.10yrs, n.papersXdecade, diff.npapers, DoD.npaper.growth))
+
+d.post1922_summXdecade.no2020.tr.K <- d.post1922_summXdecade.no2020.tr %>%
+                            kbl() %>%
+                            kable_styling()
+
+#view
+scroll_box(
+  d.post1922_summXdecade.no2020.tr.K,
+  height = "400px", #width = "500px", height = "200px"
+  width = "800px",
+  box_css = "border: 1px solid #ddd; padding: 5px; ",
+  extra_css = NULL,
+  fixed_thead = TRUE
+)
+
+```
+
+### Plot number of papers published by decade
+```{r, papersXdecade, cache=FALSE, fig.height=3.25, fig.width=8}
+npapersXdecade <- ggplot(d.post1922_summXdecade.no2020, aes(x=rounded.10yrs, y=n.papersXdecade)) +
+  geom_line() +
+  labs(x="Decade", y="Total number of publications", title="(a)") + 
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+
+npapersXdecade.compare <- ggplot(d.post1922_summXdecade.no2020, aes(x=rounded.10yrs, y=diff.npapers)) +
+  geom_line() + 
+  labs(x="Decade", y="Number more publications vs last decade", title="(b)") + 
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+
+npapersDoD.growth <- ggplot(d.post1922_summXdecade.no2020, aes(x=rounded.10yrs, y=DoD.npaper.growth)) +
+  geom_line() + 
+  labs(x="Decade", y="Percent growth vs last decade", title="(c)") + 
+  ylim(0,max(d.post1922_summXdecade.no2020$DoD.npaper.growth)) +
+  theme_bw()
+
+
+#print plot
+grid.arrange(npapersXdecade, npapersXdecade.compare, npapersDoD.growth, ncol = 3, nrow = 1)
+
+#save plot as pdf
+  #pdf("Fig1_publicationrates.pdf", width=8, height=3.25)
+  #grid.arrange(npapersXdecade, npapersXdecade.compare, npapersDoD.growth, ncol = 3, nrow = 1)
+  #dev.off()
+```
+
+
+# Session info & citations
+```{r}
+sessionInfo()
+
+citation("tidyverse")
+citation("gridExtra")
+citation("quanteda")
+citation("stringr")
+citation("scales")
+citation("kableExtra")
+```
+
+
