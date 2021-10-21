@@ -1,0 +1,451 @@
+---
+title: "History of dominance hierarchy research - title term use"
+author: "Liz Hobson (elizabeth.hobson@uc.edu)"
+output: 
+  html_document:
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: lumen
+pdf_document:
+    number_sections: true
+    toc: true
+    toc_depth: 3
+---
+
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 12px;
+  }
+td {  /* Table  */
+  font-size: 10px;
+}
+h1.title {
+  font-size: 20px;
+  color: Black;
+}
+h1 { /* Header 1 */
+  font-size: 18px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 16px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 14px;
+  color: DarkBlue;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 14px;
+}
+</style>
+
+# Load packages/functions & data
+```{r}
+library(tidyverse)
+library(igraph)
+library(reshape2)
+library(RColorBrewer)
+library(gridExtra)
+
+#convert dataframe to matri=x==x
+matrix.please <- function(x) {
+  m<-as.matrix(x[,-1])
+  rownames(m)<-x[,1]
+  m
+}
+
+# Import data and exclude any year prior to 1922
+d.stem <- read_csv("Data_stemmed.title.terms.csv") #
+```
+
+# PART 1: Clean the stemmed title terms
+
+## How many stemmed terms are in each title? (Whole corpus, no minimum use)
+```{r}
+d.stem.counttermsXdoc <- d.stem %>% group_by(year, decade, docID) %>% summarize(n.terms = n())
+
+# summarize number of title terms by decade
+d.stem.counttermsXdocXdecade <- d.stem.counttermsXdoc %>% group_by(decade) %>% summarize(n.docs=n(),
+                                                                                          mean.nterms = mean(n.terms),
+                                                                                          median.nterms=median(n.terms),
+                                                                                          min.nterms = min(n.terms),
+                                                                                          max.nterms = max(n.terms))
+
+```
+Title length was relatively consistent across the dataset with on median number of title terms per title ranging from `r min(d.stem.counttermsXdocXdecade$median.nterms)` to `r max(d.stem.counttermsXdocXdecade$median.nterms)` with an average median number of terms per decade of `r mean(d.stem.counttermsXdocXdecade$median.nterms)`
+
+## Summarize title term use by publication
+
+```{r}
+d.stem.countXdoc <- d.stem %>% group_by(year, decade, docID, stemmed.term) %>% summarize(countXdoc = n())
+
+d.stem.countXdoc
+max(d.stem.countXdoc$countXdoc)
+
+d.stem.countXdoc$presenceXdoc <- 1
+
+#get rid of any NAs accidentally introduced
+d.stem.countXdoc <- d.stem.countXdoc[complete.cases(d.stem.countXdoc),]
+unique(is.na(d.stem.countXdoc$stemmed.term))
+```
+
+## Summarize title term use by publication & clean
+Only counts title term use (terms can be used a maximum of once per title).
+
+```{r}
+term.useXall <- d.stem.countXdoc %>% group_by(stemmed.term) %>% summarize (count.total.term.presence = n())
+
+term.useXnon.rare <- subset(term.useXall, count.total.term.presence>=25)
+term.useXnon.rare$term.length <- stringr::str_length(term.useXnon.rare$stemmed.term)
+
+#exclude any term with only one character
+cleaned.stemmed <- subset(term.useXnon.rare, term.length>1)
+min(cleaned.stemmed$term.length)
+```
+
+
+## Merge cleaned title terms back to main database with publication information
+Use "term.useXnon.rare" to retain only words used in at least 25 documents out the large database. Use merge to retain only rows matching the cleaned title terms.
+```{r}
+d.stem.countXdoc.usedterms <- merge(d.stem.countXdoc, cleaned.stemmed, by="stemmed.term", all.y=TRUE)
+
+# number records prior to exclusion
+nrow(d.stem.countXdoc)
+
+# number records after rarely used words excluded
+nrow(d.stem.countXdoc.usedterms)
+length(unique(d.stem.countXdoc.usedterms$stemmed.term))
+
+# number of stemmed terms in full dataset
+length(unique(d.stem.countXdoc$stemmed.term))
+
+# save data as cached (use this dataframe for term co-occurrence networks)
+#write.csv(d.stem.countXdoc.usedterms, "Data_stemmed.title.terms_commonly.used.terms_countXdocument.csv", row.names=FALSE)
+```
+After excluding rarely used terms found in fewer than 25 separate publications, the database contained `r length(unique(d.stem.countXdoc.usedterms$stemmed.term))` unique terms (of a total of `r length(unique(d.stem.countXdoc$stemmed.term))` unique stemmed terms in titles in the full database. This threshold removes very rarely-used terms)
+
+## How many stemmed terms are in each title? (MINIMUM USE 25 publications)
+```{r}
+d.stem.countXdoc.usedtermsXdoc <- d.stem.countXdoc.usedterms %>% group_by(year, decade, docID) %>% summarize(n.terms = n())
+
+# summarize number of title terms by decade
+d.stem.countXdoc.usedtermsXdocXdecade <- d.stem.countXdoc.usedtermsXdoc %>% group_by(decade) %>% summarize(n.docs=n(),
+                                                                                          mean.nterms = mean(n.terms),
+                                                                                          median.nterms=median(n.terms),
+                                                                                          min.nterms = min(n.terms),
+                                                                                          max.nterms = max(n.terms))
+
+```
+Title length was relatively consistent across the dataset with on median number of title terms per title ranging from `r min(d.stem.countXdoc.usedtermsXdocXdecade$median.nterms)` to `r max(d.stem.countXdoc.usedtermsXdocXdecade$median.nterms)` with an average median number of terms per decade of `r mean(d.stem.countXdoc.usedtermsXdocXdecade$median.nterms)`. Maximum number of stemmed title terms used in titles (after filtering to retain only title terms used in at least 25 publications in the entire dataset) did increase over time, with fewer common title terms in earlier decades and more in later decades, although this pattern has plateaued since 1970. 
+
+# PART 2 analyses:
+
+## Pool by decade to look for changes in word usage
+
+```{r}
+# SUMMARIZE: how many times is each term present in each decade?
+summ_terms.presXdecade <- d.stem.countXdoc.usedterms %>% 
+                              group_by(decade, stemmed.term) %>% 
+                              summarize(ntimes.termpresentXdec=sum(presenceXdoc))
+
+head(summ_terms.presXdecade,10)
+
+# make data wide format (terms in rows, decades in columns)
+summ_terms.presXdecade.cast <- reshape2::dcast(summ_terms.presXdecade, stemmed.term ~ decade, value.var="ntimes.termpresentXdec")
+head(summ_terms.presXdecade.cast,20)
+
+#convert all NA to 0 (term not present in any doc in that decade) #d[is.na(d)] <- 0
+summ_terms.presXdecade.cast[is.na(summ_terms.presXdecade.cast)] <- 0
+head(summ_terms.presXdecade.cast,20)
+summ_terms.presXdecade.cast.mx <- matrix.please(summ_terms.presXdecade.cast)
+
+#simplify to presence of term in decade, rather than presence in certain number of documents
+# (this helps correct for volume of papers published)
+summ_terms.presXdecade.decadepres <- summ_terms.presXdecade.cast.mx
+summ_terms.presXdecade.decadepres[summ_terms.presXdecade.decadepres>1] <- 1
+head(summ_terms.presXdecade.decadepres,20)
+
+# multiply by transpose to get decade X decade matrix use of terms (when terms present or absent in any doc in that decade)
+decadeXdecade <- t(summ_terms.presXdecade.decadepres) %*% summ_terms.presXdecade.decadepres
+decadeXdecade
+
+#remove diagonal
+diag(decadeXdecade) <- NA
+decadeXdecade.propXrow <- as.data.frame(decadeXdecade)/rowSums(as.data.frame(decadeXdecade))
+
+#melt decade x decade data to facilitate plotting
+decadeXdecade.melt <- reshape2::melt(decadeXdecade)
+names(decadeXdecade.melt)
+
+colnames(decadeXdecade.melt) <- c("Decade1", "Decade2", "Nterms.present.both")
+
+decadeXdecade.melt.noNA <- decadeXdecade.melt[complete.cases(decadeXdecade.melt), ] 
+
+# normalize, grouped by decade1
+decadeXdecade.melt.noNA.summ <- decadeXdecade.melt.noNA %>% 
+                                    group_by(Decade1) %>% 
+                                    summarize(Decade2=Decade2,
+                                              decade.sum=sum(Nterms.present.both),
+                                              percentXdecade = (Nterms.present.both / decade.sum)*100,
+                                              maxXdecade=max(Nterms.present.both),
+                                              percentofmax = (Nterms.present.both / max(Nterms.present.both))*100
+                                              )
+
+#which decades had pretty high similarity?
+subset(decadeXdecade.melt.noNA.summ, percentofmax>90)
+subset(decadeXdecade.melt.noNA.summ, Decade1=="1920")
+
+decadeXdecade.melt.cast <- reshape2::dcast(decadeXdecade.melt, Decade1~Decade2, value.var="Nterms.present.both")
+
+```
+
+## Make nice heatmaps of decadal similarity
+```{r, term.simXdecade, cache=FALSE, fig.height=3.25, fig.width=8}
+
+#unique(decadeXdecade.melt.noNA$Decade1)
+
+decadeXdecade.melt.noNA$Decade1.f <- as.factor(decadeXdecade.melt.noNA$Decade1)
+decadeXdecade.melt.noNA$Decade2.f <- as.factor(decadeXdecade.melt.noNA$Decade2)
+str(decadeXdecade.melt.noNA)
+
+
+decadeXdecade.melt.noNA.summ$Decade1.f <- as.factor(decadeXdecade.melt.noNA.summ$Decade1)
+decadeXdecade.melt.noNA.summ$Decade2.f <- as.factor(decadeXdecade.melt.noNA.summ$Decade2)
+str(decadeXdecade.melt.noNA.summ)
+
+#library(RColorBrewer)
+#set color palette
+  pal <- colorRampPalette(rev(brewer.pal(11, 'Spectral')), space='Lab')
+
+  #Plot faceted heatmaps
+    raw.coooc <- ggplot(data = decadeXdecade.melt.noNA, aes(x=Decade2.f, y=Decade1.f, fill=Nterms.present.both)) + 
+              geom_tile(colour="white",size=0.25) +
+              #scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+              labs(title = "(a) Raw similarity", x = "Decade", y = "Decade") +
+              scale_fill_gradientn(colours = pal(100)) + 
+              scale_x_discrete(expand=c(0,0),
+                   breaks=c("1920","1930","1940","1950","1960","1970","1980","1990","2000", "2010","2020"))+
+              scale_y_discrete(expand=c(0,0),
+                   breaks=c("1920","1930","1940","1950","1960","1970","1980","1990","2000", "2010","2020"))+
+              coord_equal() +
+              theme_grey(base_size=8) #set a base size for all fonts
+  
+              
+
+
+ #Plot faceted heatmaps
+    row.normed <- ggplot(data = decadeXdecade.melt.noNA.summ, aes(x=Decade2.f, y=Decade1.f, fill=percentXdecade)) + 
+              geom_tile(colour="white",size=0.25) +
+              #scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+              labs(title = "(b) Percent similarity", x = "Compare to past decades", y = "Compare to future decades") +
+              scale_fill_gradientn(colours = pal(100)) + 
+              scale_x_discrete(expand=c(0,0),
+                   breaks=c("1920","1930","1940","1950","1960","1970","1980","1990","2000", "2010","2020"))+
+              scale_y_discrete(expand=c(0,0),
+                   breaks=c("1920","1930","1940","1950","1960","1970","1980","1990","2000", "2010","2020"))+
+              coord_equal() +
+              theme_grey(base_size=8) #set a base size for all fonts
+    
+    
+  #Plot faceted heatmaps
+    percent.maxXdecade <- ggplot(data = decadeXdecade.melt.noNA.summ, aes(x=Decade2.f, y=Decade1.f, fill=percentofmax)) + 
+              geom_tile(colour="white",size=0.25) +
+              #scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+              labs(title = "(c) Comparison to maximum", x = "Compare to past decades", y = "Compare to future decades") +
+              scale_fill_gradientn(colours = pal(100)) + 
+              scale_x_discrete(expand=c(0,0),
+                   breaks=c("1920","1930","1940","1950","1960","1970","1980","1990","2000", "2010","2020"))+
+              scale_y_discrete(expand=c(0,0),
+                   breaks=c("1920","1930","1940","1950","1960","1970","1980","1990","2000", "2010","2020"))+
+              coord_equal() +
+              theme_grey(base_size=8) #set a base size for all fonts
+
+
+    #library(ggpubr)  see: https://stackoverflow.com/questions/12041042/how-to-plot-just-the-legends-in-ggplot2  
+legend.a <- ggpubr::get_legend(raw.coooc)
+legend.b <- ggpubr::get_legend(row.normed)
+legend.c <- ggpubr::get_legend(percent.maxXdecade)
+
+
+            
+gridExtra::grid.arrange(raw.coooc+ theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust=0.5)), 
+                        row.normed+ theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust=0.5)),
+                        percent.maxXdecade+ theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust=0.5)),
+                        #
+                        ggpubr::as_ggplot(legend.a),
+                        ggpubr::as_ggplot(legend.b),
+                        ggpubr::as_ggplot(legend.c),
+                        ncol = 3, nrow = 2)
+
+#save plot as pdf
+
+# pdf("Fig2_decadeXdecade.term.similarity.pdf", width=8, height=5.25)
+  # gridExtra::grid.arrange(raw.coooc+ theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust=0.5)), 
+  #                         row.normed+ theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust=0.5)),
+  #                         percent.maxXdecade+ theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust=0.5)),
+  #                         #
+  #                         ggpubr::as_ggplot(legend.a),
+  #                         ggpubr::as_ggplot(legend.b),
+  #                         ggpubr::as_ggplot(legend.c),
+  #                         ncol = 3, nrow = 2)
+  # dev.off()
+
+```
+
+
+
+
+# Find diversity of title term use by decade
+```{r}
+# count unique stemwords total
+whole.history.unique.stemword.n <- length(unique(summ_terms.presXdecade$stemmed.term))
+
+# for each decade, how many terms are present?
+summ_terms.presXdecade.count <- summ_terms.presXdecade %>% group_by(decade) %>% summarize(n.stemwords=n(),
+                                                                                          percent.words.usedXdecade=(n.stemwords/whole.history.unique.stemword.n)*100)
+
+
+summ_terms.presXdecade.count$decade.factor <- as.factor(summ_terms.presXdecade.count$decade)
+summ_terms.presXdecade$decade.factor <- as.factor(summ_terms.presXdecade$decade)
+
+nrow(summ_terms.presXdecade)
+
+#how many unique terms are present in full dataset (based on the top N terms from each decade)
+length(unique(summ_terms.presXdecade$stemmed.term))
+
+
+#how many decades are each term "present" in?
+summ_terms.ndecades.term.present <- summ_terms.presXdecade %>% 
+                                              group_by(stemmed.term) %>%
+                                              summarize(n.decades.present=n(),
+                                                        first.decade=min(decade),
+                                                        last.decade=max(decade),
+                                                        n.decades.missing=(last.decade-first.decade)/10,
+                                                        percent.decades.present=(n.decades.present/(n.decades.present+n.decades.missing))*100)
+
+# average percent decades present since first appearance
+mean(summ_terms.ndecades.term.present$percent.decades.present)
+max(summ_terms.ndecades.term.present$percent.decades.present)
+min(summ_terms.ndecades.term.present$percent.decades.present)
+
+#when do new terms appear?
+summ_terms.noveltermsXdecade <- summ_terms.ndecades.term.present %>% 
+                                              group_by(first.decade) %>%
+                                              summarize(n.new.terms=n())
+
+# add 0 for 2020 if no novel terms present
+d2020 <- c("2020", "0")
+
+summ_terms.noveltermsXdecade <- rbind.data.frame(summ_terms.noveltermsXdecade, d2020)
+str(summ_terms.noveltermsXdecade)
+summ_terms.noveltermsXdecade$n.new.terms <- as.numeric(summ_terms.noveltermsXdecade$n.new.terms)
+
+#when do terms disappear?
+summ_terms.extincttermsXdecade <- summ_terms.ndecades.term.present %>% 
+                                              group_by(last.decade) %>%
+                                              summarize(n.extinct.terms=n())
+
+#once a term is in use, they rarely go "extinct" and that's only been happening recently
+summ_terms.extincttermsXdecade
+
+#show all extinct terms
+subset(summ_terms.ndecades.term.present, last.decade<2020)
+
+
+
+
+
+# merge n decades back to when term used
+summ_byuse_wdecadepressumm <- merge(summ_terms.ndecades.term.present, 
+                                    subset(summ_terms.presXdecade, select=c(decade, stemmed.term, ntimes.termpresentXdec)),
+                                    by="stemmed.term", all.y=TRUE)
+
+
+# keep only terms used in many decades
+commonXdecades <- subset(summ_byuse_wdecadepressumm, n.decades.present>=8)
+length(unique(commonXdecades$stemmed.term))
+
+# add number of times each team used total
+documentsXdecade <- d.stem.countXdoc.usedterms %>% group_by(decade) %>% summarize(number.docsXdecade=length(unique(docID)))
+
+# merge n docs by decade to the commonly used terms
+commonXdecades.meta <- merge(commonXdecades, documentsXdecade, by="decade", all.x=TRUE)
+commonXdecades.meta$normalized.useXdecade <- (commonXdecades.meta$ntimes.termpresentXdec / commonXdecades.meta$number.docsXdecade)*100
+#commonXdecades.meta$log.normalized.useXdecade <- log10(commonXdecades.meta$normalized.useXdecade)
+
+commonXdecades.meta.cast <- reshape2::dcast(commonXdecades.meta, stemmed.term~decade, value.var="normalized.useXdecade")
+
+commonXdecades.decadeXterm.cast <- reshape2::dcast(commonXdecades.meta, stemmed.term~decade, value.var="ntimes.termpresentXdec")
+
+#diversity in stemword use X decade
+library(vegan)
+#diversity(data[-1], index="shannon")
+
+#decades by terms matrix format
+commonXdecades.decadeXterm.cast.mx <- matrix.please(commonXdecades.decadeXterm.cast)
+commonXdecades.decadeXterm.cast.mx[is.na(commonXdecades.decadeXterm.cast.mx)] <- 0 # d[is.na(d)] <- 0
+term.diversityXdecade <- diversity(t(commonXdecades.decadeXterm.cast.mx), index = "shannon") #default is shannon
+str(term.diversityXdecade)
+term.diversityXdecade <- as.data.frame(term.diversityXdecade)
+term.diversityXdecade$decade <- row.names(term.diversityXdecade)
+```
+
+# plot diversity of stemword use by decade
+```{r, stemword.diversityXdecade, cache=FALSE, fig.height=3.25, fig.width=8}
+#diversity
+plot.diversity <- ggplot(term.diversityXdecade, aes(x=decade, y=term.diversityXdecade, group=1)) +
+  geom_line() +
+  labs(x="Decade", y="Diversity of stemword use", title="(a)") + 
+  #scale_y_continuous(labels = scales::comma) +
+  #ylim(0,max(term.diversityXdecade$term.diversityXdecade)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5)) 
+
+#novel words
+novelty <- ggplot(summ_terms.noveltermsXdecade, aes(x=first.decade, y=n.new.terms, group=1)) +
+  geom_line() +
+  labs(x="Decade", y="Number novel stemwords introduced", title="(b)") + 
+  #scale_y_continuous(labels = scales::comma) +
+  #ylim(0,max(term.diversityXdecade$term.diversityXdecade)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5)) 
+
+#extinction
+extinction <- ggplot(summ_terms.extincttermsXdecade, aes(x=last.decade, y=n.extinct.terms, group=1)) +
+  geom_line() +
+  labs(x="Decade", y="Number novel stemwords introduced", title="(b)") + 
+  #scale_y_continuous(labels = scales::comma) +
+  #ylim(0,max(term.diversityXdecade$term.diversityXdecade)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5)) 
+  
+#percent words in whole corpus used in each decade
+percent.use <- ggplot(summ_terms.presXdecade.count, aes(x=decade.factor, y=percent.words.usedXdecade)) +
+  geom_bar(stat="identity") +
+  labs(x="Decade", y="Percent total stemwords present", title="(c)") + 
+  #scale_y_continuous(labels = scales::comma) +
+  #ylim(0,max(term.diversityXdecade$term.diversityXdecade)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5)) #+
+  #xlim(1915,2025) 
+
+  
+#print plot
+grid.arrange(plot.diversity, novelty, percent.use, ncol = 3, nrow = 1)
+
+#save plot as pdf
+  # pdf("FigTKTK_stemworddiversitynovelty.pdf", width=8, height=3.25)
+  # grid.arrange(plot.diversity, novelty, percent.use, ncol = 3, nrow = 1)
+  # dev.off()
+
+```
+

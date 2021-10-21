@@ -1,0 +1,636 @@
+---
+title: "History of dominance hierarchy research - title term co-occurrence"
+author: "Liz Hobson (elizabeth.hobson@uc.edu)"
+output: 
+  html_document:
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: lumen
+pdf_document:
+    number_sections: true
+    toc: true
+    toc_depth: 3
+---
+
+<style type="text/css">
+
+body{ /* Normal  */
+      font-size: 12px;
+  }
+td {  /* Table  */
+  font-size: 10px;
+}
+h1.title {
+  font-size: 20px;
+  color: Black;
+}
+h1 { /* Header 1 */
+  font-size: 18px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 16px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 14px;
+  color: DarkBlue;
+}
+code.r{ /* Code block */
+    font-size: 12px;
+}
+pre { /* Code block - determines code spacing between lines */
+    font-size: 14px;
+}
+</style>
+
+# Load packages/functions & data
+```{r}
+library(wordcloud)
+library(tidyverse)
+library(RColorBrewer)
+library(igraph)
+library(gridExtra)
+
+#convert dataframe to matri=x==x
+matrix.please <- function(x) {
+  m<-as.matrix(x[,-1])
+  rownames(m)<-x[,1]
+  m
+}
+```
+
+
+# Load cached data
+```{r}
+d.stem.countXdoc.usedterms <- read_csv("Data_stemmed.title.terms_commonly.used.terms_countXdocument.csv")
+```
+
+# Make network summaries
+```{r}
+#use d.stem.countXdoc.usedterms, created above, which has any word used in <=25 documents removed from corpus
+#d.stem.countXdoc.usedterms
+
+#for each decade, make termXterm matrix to find number of co-occurrences
+decade.s <- unique(d.stem.countXdoc.usedterms$decade)
+decade.s <- sort(decade.s) #sort to get right order
+
+# all.coocc <- data.frame(decade=numeric(),
+#                         term1=character(), 
+#                         term2=character(),
+#                         ct.decade.cooccurrence=numeric()
+#                         )
+
+term.coocc.net.summ <- data.frame(decade=numeric(), 
+                                     stemword=character(), 
+                                     degree=numeric(), 
+                                     strength=numeric(), 
+                                     eigen.centrality=numeric(),
+                                     #closeness=numeric(),
+                                     betweenness=numeric(),
+                                     term.comm.mmb=numeric()
+                                     )
+
+# save all term cooccurrences by decade with community membership
+termXterm.coocc.communities <- data.frame(decade=numeric(),
+                                          term1=character(), 
+                                          term2=character(), 
+                                          ct.decade.cooccurrence=numeric(),
+                                          term1.community.mmb=numeric(),
+                                          term2.community.mmb=numeric(),
+                                          cooccXcommunity=character()
+                                          )
+# decade-level network summaries
+decade.level.summaries <- data.frame(decade=numeric(),
+                                        edge.density=numeric(),
+                                        global.cluster=numeric(),
+                                        avg.local.cluster=numeric(),
+                                        n.communities=numeric(),
+                                        modularity=numeric()
+                                        )                                          
+# start pdf for decadal plots
+#pdf("FigTKTK_decadal.networks.pdf", width=8, height=8)
+
+for(dec in 1:length(decade.s)) { #dec=2
+  loop.decade <- decade.s[dec]
+  print(loop.decade)
+  
+  #extract data from decade of interest and make into term by document matrix
+  loop.data <- subset(d.stem.countXdoc.usedterms, decade==loop.decade)
+  loop.data.cast <- reshape2::dcast(loop.data, stemmed.term~docID, value.var="presenceXdoc")
+  loop.data.cast.mx <- matrix.please(loop.data.cast)
+  loop.data.cast.mx[is.na(loop.data.cast.mx)] <- 0
+  
+  #find the number of documents in each decade where two stemwords were used in the same title
+  loop.termXterm_count <- loop.data.cast.mx %*% t(loop.data.cast.mx)
+  
+  #delete lower triangle of matrix & set diagonal to 0
+  loop.termXterm_count[lower.tri(loop.termXterm_count)] <- 0
+  diag(loop.termXterm_count) <- 0
+  
+  #reshape to summarize term co-occurrence counts & keep only rows where terms co-occurred
+  loop.termXterm_count.df <- as.data.frame(loop.termXterm_count)
+  stemmed.term <- row.names(loop.termXterm_count.df)
+  loop.termXterm_count.df <- cbind.data.frame(stemmed.term, loop.termXterm_count.df)
+  loop.termXterm_coocc <- reshape2::melt(loop.termXterm_count.df)
+  colnames(loop.termXterm_coocc) <- c("term1", "term2", "ct.decade.cooccurrence")
+  
+  #exclude any term1-term2 pairings where co-occurrence did not occur
+  loop.termXterm_coocc <- subset(loop.termXterm_coocc, ct.decade.cooccurrence>0)
+
+  #save all co-occurrence data to summary df
+  # loop.coocc <- cbind.data.frame(decade=rep(loop.decade, nrow(loop.termXterm_coocc)), loop.termXterm_coocc)
+  # all.coocc <- rbind.data.frame(all.coocc, loop.coocc)
+  
+  #make into network object
+  loop.termXterm_coocc.net <- igraph::graph_from_data_frame(loop.termXterm_coocc, directed=FALSE)
+
+  #find network-level summaries by decade
+  ed <- edge_density(loop.termXterm_coocc.net)
+  g.cluster <- transitivity(loop.termXterm_coocc.net, "global")
+  g.cluster <- transitivity(loop.termXterm_coocc.net, "global")
+  av.l.cluster <- transitivity(loop.termXterm_coocc.net, "localaverage") 
+  
+  fg.comm <- fastgreedy.community(loop.termXterm_coocc.net)
+  length(fg.comm) #number of communities
+  modu <- modularity(fg.comm) #modularity
+  
+  # find community-level summaries
+  community.size <- sizes(fg.comm)
+  
+  # find term membership in communities
+  names <- V(loop.termXterm_coocc.net)$name
+  comm.mmb <- membership(fg.comm)
+  
+  #find modularity
+  modu <- modularity(fg.comm)
+
+      
+  #V(loop.termXterm_coocc.net)$mem <- membership(fg.comm)
+  #g.community.connections <- contract.vertices(loop.termXterm_coocc.net, V(loop.termXterm_coocc.net)$mem, vertex.attr.comb = "ignore")
+  
+  #assemble term-coocc summaries
+  termcooc.summaries <- data.frame(decade=rep(loop.decade, length(names)), 
+                                     stemword=names, 
+                                     term1.community.mmb=as.vector(comm.mmb),
+                                     term2.community.mmb=as.vector(comm.mmb)
+                                     ) 
+  
+  #add term community membership back to term-cooccurrence edgelist
+  loop.termXterm_coocc <- merge(loop.termXterm_coocc, subset(termcooc.summaries, select=c(-decade, -term1.community.mmb)),
+                                                by.x="term2", by.y="stemword",
+                                                all.x=TRUE)
+  
+  loop.termXterm_coocc <- merge(loop.termXterm_coocc, subset(termcooc.summaries, select=c(-decade, -term2.community.mmb)),
+                                                by.x="term1", by.y="stemword",
+                                                all.x=TRUE)
+    
+  loop.termXterm_coocc$cooccXcommunity <- ifelse(loop.termXterm_coocc$term1.community.mmb==loop.termXterm_coocc$term2.community.mmb, "within", "across")
+  
+  # add decade
+  loop.termXterm_coocc <- cbind.data.frame(decade=rep(loop.decade, nrow(loop.termXterm_coocc)), loop.termXterm_coocc)
+  
+  #save term cooccurrence by community data
+  termXterm.coocc.communities <- rbind.data.frame(termXterm.coocc.communities, loop.termXterm_coocc)
+  
+  
+  set.seed(42)
+  l=layout_with_fr(loop.termXterm_coocc.net)
+  plot(fg.comm, 
+       loop.termXterm_coocc.net, 
+       layout=l,
+       vertex.label="",
+       vertex.size=5,
+       edge.width=E(loop.termXterm_coocc.net)$ct.decade.cooccurrence,
+       main=loop.decade
+       )
+  
+  #find term-level summaries
+  names <- V(loop.termXterm_coocc.net)$name
+  de <- degree(loop.termXterm_coocc.net)
+  st <- graph.strength(loop.termXterm_coocc.net, weights = E(loop.termXterm_coocc.net)$ct.decade.cooccurrence)
+  ec <- eigen_centrality(loop.termXterm_coocc.net, weights = E(loop.termXterm_coocc.net)$ct.decade.cooccurrence)
+  be <- betweenness(loop.termXterm_coocc.net, normalized=T)
+  com.mmb <- as.vector(membership(fg.comm)) # term community membership
+  
+  #assemble term-level summaries
+  term.level.summaries <- data.frame(decade=rep(loop.decade, length(names)), 
+                                     stemword=names, 
+                                     degree=de, 
+                                     strength=st, 
+                                     eigen.centrality=ec$vector,
+                                     betweenness=be,
+                                     term.comm.mmb=com.mmb
+                                     ) 
+  #save to summary df
+  term.coocc.net.summ <- rbind.data.frame(term.coocc.net.summ, term.level.summaries)
+  
+    
+  #assemble decade-level network summaries
+  loop.decade.level.summaries <- data.frame(decade=loop.decade, 
+                                        edge.density=ed,
+                                        global.cluster=g.cluster,
+                                        avg.local.cluster=av.l.cluster,
+                                        n.communities=length(fg.comm),
+                                        modularity=modu
+                                        )
+  # save to summary df
+  decade.level.summaries <- rbind.data.frame(decade.level.summaries, loop.decade.level.summaries)
+}
+
+#turn off pdf
+  #dev.off()
+
+# write_csv(term.coocc.net.summ, "Data_term.coocc.net.summ.csv")
+# write_csv(termXterm.coocc.communities, "Data_termXterm.coocc.communities.csv")
+# write_csv(decade.level.summaries, "Data_decade.level.summaries.csv")
+
+```
+
+
+
+# summarize term co-occ X community membership
+```{r}
+termXterm.coocc.communities.summ <- termXterm.coocc.communities %>% 
+                                        group_by(decade) %>% 
+                                        summarize(total.n=n(),
+                                                  dyad.within=sum(cooccXcommunity=="within"),
+                                                  dyad.outside=sum(cooccXcommunity=="across"),
+                                                  percent.within=(dyad.within/total.n)*100,
+                                                  percent.outside=(dyad.outside/total.n)*100
+                                                  )
+
+percent.within.community.edges <- termXterm.coocc.communities.summ$percent.within
+percent.outside.community.edges <- termXterm.coocc.communities.summ$percent.outside
+
+# add percent within connections
+decade.level.summaries.plus <- cbind.data.frame(decade.level.summaries, percent.within.community.edges, percent.outside.community.edges)
+```
+
+
+# Plot modularity by decade
+```{r, decade.net.summs, cache=FALSE, fig.height=3.25, fig.width=8}
+#PRINT PDF AT END OF CHUNCK
+
+decade.level.summaries.plus
+
+decade.level.summaries.plus$decade.f <- as.factor(decade.level.summaries.plus$decade)
+
+modularity <- ggplot(decade.level.summaries.plus, aes(x=decade.f, y=modularity, group=1)) +
+  geom_line() +
+  labs(x="Decade", y="Modularity", title="(a)") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5))
+
+num.communities <- ggplot(decade.level.summaries.plus, aes(x=decade.f, y=n.communities)) +
+  geom_bar(stat="identity") +
+  labs(x="Decade", y="Number communities", title="(b)") + 
+  ylim(0,(max(decade.level.summaries$n.communities)+1)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5))
+
+percent.outside.edges <- ggplot(decade.level.summaries.plus, aes(x=decade.f, y=percent.outside.community.edges, group=1)) +
+  geom_line() +
+  labs(x="Decade", y="Percent edges to different clusters", title="(c)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5))
+
+#print combined panel plot
+grid.arrange(modularity, num.communities, percent.outside.edges, ncol = 3, nrow = 1)
+
+#save combined panel plot as pdf
+#pdf("FigTKTK_decadal.network.stats.communities.pdf", width=8, height=3.25)
+#grid.arrange(modularity, num.communities, percent.outside.edges, ncol = 3, nrow = 1)
+#dev.off()
+
+
+```
+
+# summarize decadal networks for each term
+
+```{r}
+#term.coocc.net.summ
+colnames(term.coocc.net.summ)[7] <- "term.comm.mmb"
+
+max.ecXdecade <- term.coocc.net.summ %>% group_by(decade) %>% slice(which.max(eigen.centrality))
+
+#find which terms have max centrality per decade for each community
+max.ecXdecadeXcommunity <- term.coocc.net.summ %>% 
+                              group_by(decade,term.comm.mmb) %>% 
+                              slice(which.max(eigen.centrality)) %>%
+                              arrange(decade, term.comm.mmb)
+
+max.ecXdecadeXcommunity.tr <- subset(max.ecXdecadeXcommunity, select=c(decade, stemword, term.comm.mmb))
+colnames(max.ecXdecadeXcommunity.tr) <- c("decade", "community.stemword", "community.id")
+
+term.coocc.net.summ.wcommunity.term <- merge(term.coocc.net.summ, max.ecXdecadeXcommunity.tr,
+                                             by.x=c("decade", "term.comm.mmb"),
+                                             by.y=c("decade", "community.id"),
+                                             all.x=TRUE)
+
+
+
+
+term.coocc.net.summ.wcommunity.term$decade.char <- paste0("d", as.character(term.coocc.net.summ.wcommunity.term$decade))
+
+summ.community.ct <- reshape2::dcast(term.coocc.net.summ.wcommunity.term, stemword~decade.char,
+               value.var = "community.stemword")
+
+```
+
+#how often are stemword pairs in the same communities together?
+
+The Jaccard similarity index (sometimes called the Jaccard similarity coefficient) compares members for two sets to see which members are shared and which are distinct. It's a measure of similarity for the two sets of data, with a range from 0% to 100%. The higher the percentage, the more similar the two populations
+```{r}
+#termXterm.coocc.communities
+
+# how many times do two terms co-occur?
+#total.dyadic.coocc <- termXterm.coocc.communities %>% group_by(term1, term2) %>% summarize(total.cooccXdyad=n()) %>% arrange(total.cooccXdyad)
+
+# filter out rarely co-occurring pairs of stemwords
+#total.dyadic.coocc.filt <- subset(total.dyadic.coocc, total.cooccXdyad>3)
+
+
+# jaccard similarity?  #https://www.statology.org/jaccard-similarity-in-r/
+
+jaccard <- function(a, b) {
+    intersection = length(intersect(a, b))
+    union = length(a) + length(b) - intersection
+    return (intersection/union)
+}
+
+
+#term.coocc.net.summ
+
+decade.s <- unique(term.coocc.net.summ$decade)
+decade.s.to2010 <- decade.s[1:10]
+#communities.s <- unique(term.coocc.net.summ$term.comm.mmb)
+#communities.s <- sort(communities.s)
+
+jaccard.summary <- data.frame(current.decade=numeric(),
+                              next.decade=numeric(),
+                              current.community=numeric(), 
+                              next.community=numeric(), 
+                              jaccard.similarity=numeric())
+
+
+
+for(dec in 1:length(decade.s.to2010)) { #dec=10
+  loop.decade <- decade.s.to2010[dec]
+  print(loop.decade)
+  next.decade <- decade.s[dec+1]
+  loop.data <- subset(term.coocc.net.summ, decade==loop.decade)
+  next.data <- subset(term.coocc.net.summ, decade==next.decade)
+  
+  loop.communities.list <- sort(unique(loop.data$term.comm.mmb))
+  
+  #find each community membership
+  for(c in 1:length(loop.communities.list)) { #c=2
+    loop.curr.community <- loop.communities.list[c]
+    curr.community.data <- subset(loop.data, term.comm.mmb==loop.curr.community)
+    
+    loop.next.communities.list <- sort(unique(next.data$term.comm.mmb))
+
+    for(cnext in 1:length(loop.next.communities.list)) {#cnext=2
+      loop.next.community<- loop.next.communities.list[cnext]
+      next.community.data <- subset(next.data, term.comm.mmb==loop.next.community)
+      jaccard.sim <- jaccard(curr.community.data$stemword, next.community.data$stemword)
+      
+      #compile data to outside loop
+      compiled <- cbind.data.frame(current.decade=loop.decade, next.decade=next.decade, current.community=loop.curr.community, next.community=loop.next.community, jaccard.similarity=jaccard.sim)
+      jaccard.summary <- rbind.data.frame(jaccard.summary, compiled)
+      }
+    }
+  }
+  
+subset(jaccard.summary, jaccard.similarity>0.3) 
+
+jaccard.summary.tr <- na.omit(jaccard.summary)
+
+max(jaccard.summary.tr$jaccard.similarity)
+mean(jaccard.summary.tr$jaccard.similarity)
+
+#write data
+#write_csv(jaccard.summary.tr, "cached_decadal.community.jaccard.similarity.csv")
+
+
+jaccard.summary.tr.no0 <- subset(jaccard.summary.tr, jaccard.similarity>0)
+max.sim.next.community <- jaccard.summary.tr.no0 %>% group_by(current.decade, next.decade, current.community) %>% slice(which.max(jaccard.similarity))
+
+max.sim.next.community$rowID <- seq(1:nrow(max.sim.next.community))
+
+#write data to cache
+#write_csv(max.sim.next.community, "Data_cached_decadal.comm.sim.max.next.csv")
+
+# what is mean community similarity in each decade comparing one decade's community words to the community in the next decade which is most similar?
+decadal.sim <- max.sim.next.community %>% group_by(current.decade) %>% summarize(mean.similarity.to.next = mean(jaccard.similarity))
+
+decadal.sim
+decadal.sim$current.decade.f <- as.factor(decadal.sim$current.decade)
+
+
+decade.comm.sim <- ggplot(decadal.sim, aes(x=current.decade.f, y=mean.similarity.to.next, group=1)) +
+  geom_line() +
+  labs(x="Decade", y="Mean similarity", title=" ") + 
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust=0.5))
+
+decade.comm.sim
+
+#save combined panel plot as pdf
+# pdf("FigTKTK_mean.max.sim.pdf", width=3, height=3)
+# plot(decade.comm.sim, col=alpha("black", 0.3))
+# dev.off()
+```
+
+
+# Import cached data if necessary
+```{r}
+nonrare.stem <- read_csv("Data_stemmed.title.terms_commonly.used.terms_countXdocument.csv")
+head(nonrare.stem)
+
+#coocc.net.summs <- read_csv("Data_term.coocc.net.summ.csv")
+coocc.net.summs <- term.coocc.net.summ
+
+names(coocc.net.summs)[7] <- "community.mmb"
+#names(coocc.net.summs)
+head(coocc.net.summs)
+
+```
+
+
+# How many title terms are there per decade?
+Summarize overall how many terms are in database by decade as well as how many unique terms are used by decade. 
+```{r}
+titletermsXdecade <- nonrare.stem %>% group_by(decade) %>% summarize(termsXdecade = n(),
+                                                                       nunique.termsXdecade = length(unique(stemmed.term))
+                                                                       )
+#titletermsXdecade
+
+```
+
+## Merge unique title terms by decade back to main stemmed database
+```{r}
+combo_stem <- merge(nonrare.stem, 
+                    subset(titletermsXdecade, select=c(decade, nunique.termsXdecade)),
+                    by="decade")
+
+#combo_stem
+
+```
+
+## Find proportion of titles each title stemword was used compared to the total number of publications for that decade
+```{r}
+combo_stem.summXdecade <- combo_stem %>% 
+                              group_by(decade, stemmed.term) %>% 
+                              summarize(usesXdecade = sum(presenceXdoc),
+                                        nunique.termsXdecade = unique(nunique.termsXdecade)
+                                        )
+#combo_stem.summXdecade
+
+
+pubsXdecade <- combo_stem %>% group_by(decade) %>% summarize(npubsXdecade = length(unique(docID)))
+#pubsXdecade
+
+combo_stem.summXdecade <- merge(combo_stem.summXdecade, pubsXdecade, by="decade")
+
+combo_stem.summXdecade$titletermuse.proptitlesXdecade <- combo_stem.summXdecade$usesXdecade / combo_stem.summXdecade$npubsXdecade
+
+#combo_stem.summXdecade
+
+```
+
+# Merge summary to network summaries
+```{r}
+combosumm_netsumm <- merge(combo_stem.summXdecade, coocc.net.summs, 
+                           by.x=c("decade", "stemmed.term"),
+                           by.y=c("decade", "stemword"))
+
+
+combosumm_netsumm_summ <- combosumm_netsumm %>% group_by(stemmed.term) %>% 
+                                                  summarize(
+                                                    min.prop.titleuse = min(titletermuse.proptitlesXdecade),
+                                                    max.prop.titleuse = max(titletermuse.proptitlesXdecade),
+                                                    min.decade=decade[which(titletermuse.proptitlesXdecade==min(titletermuse.proptitlesXdecade))],
+                                                    max.decade=decade[which(titletermuse.proptitlesXdecade==max(titletermuse.proptitlesXdecade))]
+                                                    )
+
+nrow(subset(combosumm_netsumm_summ, max.prop.titleuse>=0.05))
+
+terms.used.plus5percent.titlesXany.decade <- subset(combosumm_netsumm_summ, max.prop.titleuse>=0.05)
+terms.used.plus5percent.titlesXany.decade
+terms.used.plus5percent.titlesXany.decade$plus5percent <- "yes"
+
+#merge back
+combosumm_netsumm_plus5percent <- merge(combosumm_netsumm, 
+                                        subset(terms.used.plus5percent.titlesXany.decade, 
+                                               select=c(stemmed.term, plus5percent, max.prop.titleuse, max.decade, plus5percent)),
+                                        by="stemmed.term",
+                                        all.y=TRUE)
+                                        
+#combosumm_netsumm_plus5percent
+nrow(combosumm_netsumm_plus5percent)
+length(unique(combosumm_netsumm_plus5percent$stemmed.term))
+
+unique(combosumm_netsumm_plus5percent$community.mmb)
+
+
+
+
+```
+# Plot top 3 terms 1930 to 2020
+```{r}
+combosumm_netsumm_plus5percent.1930to2020 <- subset(combosumm_netsumm_plus5percent, decade>1920 & decade<=2020)
+combosumm_netsumm_plus5percent.1930to2020_3HIGH <- subset(combosumm_netsumm_plus5percent.1930to2020, 
+                                                               stemmed.term=="behavior" | stemmed.term=="social" | stemmed.term=="domin")
+
+# set custom colors
+cust.col <- c("#D53E4F", "#5E4FA2", "#3288BD", "#FEE08B", "#F46D43", "#66C2A5", "#FDAE61", "#3288BD", "#ABDDA4")
+
+
+p.top.1930to2020 <- ggplot() +
+geom_line(data=combosumm_netsumm_plus5percent.1930to2020_3HIGH, 
+                    aes(x=factor(decade), y=titletermuse.proptitlesXdecade, group=stemmed.term), alpha=0.8) + #, color=factor(community.mmb)
+  labs(x="Decade", y="Proportion titles present in") +
+  scale_y_sqrt(breaks = scales::pretty_breaks(n = 8)) +
+#scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) +
+geom_point(data=combosumm_netsumm_plus5percent.1930to2020_3HIGH, 
+             aes(x=factor(decade), y=titletermuse.proptitlesXdecade, group=factor(community.mmb), color=factor(community.mmb)),alpha=0.8, size=4) +
+  scale_color_manual(values = cust.col) +
+  theme_minimal(base_size=14) + #set a base size for all fonts
+  theme(panel.background = element_rect(colour = "black", size=1)) +
+#plot just labels
+geom_text(data = combosumm_netsumm_plus5percent.1930to2020_3HIGH %>% filter(decade == 2020), 
+       aes(x=factor(decade), y=titletermuse.proptitlesXdecade, label=stemmed.term), size = 3.5) +
+geom_text(data = combosumm_netsumm_plus5percent.1930to2020_3HIGH %>% filter(decade == 1930), 
+       aes(x=factor(decade), y=titletermuse.proptitlesXdecade, label=stemmed.term), size = 3.5)
+
+p.top.1930to2020
+
+#save plot as pdf
+  #pdf("FigNEW_termproportionWcomm.mmbXdecade.TOP3_1930to2020.pdf", width=10, height=3)
+  #p.top.1930to2020
+  #dev.off()
+```
+
+
+# Plot wordclouds by decade
+```{r}
+
+sliced.top10percomm_nofilter <- combosumm_netsumm %>% 
+                        arrange(decade, community.mmb, desc(eigen.centrality)) %>% 
+                        group_by(decade, community.mmb) %>% 
+                        slice(1:10)
+
+sliced.top10percomm_nofilter.tr <- subset(sliced.top10percomm_nofilter, select=c(decade, stemmed.term, community.mmb, eigen.centrality))
+
+unique(sliced.top10percomm_nofilter.tr$community.mmb)
+
+cust.col.long <- c(cust.col, "darkgrey", "black", "lightgrey")
+community.mmb <- unique(sliced.top10percomm_nofilter.tr$community.mmb)
+
+
+length(cust.col.long)
+colorX12comm <- cbind.data.frame(community.mmb, cust.col.long)
+
+sliced.top10percomm_nofilter.tr_cols <- merge(sliced.top10percomm_nofilter.tr, colorX12comm, by="community.mmb")
+nrow(sliced.top10percomm_nofilter.tr)
+nrow(sliced.top10percomm_nofilter.tr_cols)
+
+
+sliced.top10percomm_nofilter.tr_cols_social <- subset(sliced.top10percomm_nofilter.tr_cols, stemmed.term=="social")
+sliced.top10percomm_nofilter.tr_cols_social <- sliced.top10percomm_nofilter.tr_cols_social %>% arrange(decade)
+
+sliced.top10percomm_nofilter.tr_cols <- sliced.top10percomm_nofilter.tr_cols %>% arrange(decade, community.mmb)
+
+sel.decades <- unique(sliced.top10percomm_nofilter.tr_cols$decade)
+
+layout(matrix(c(1, 1), nrow=2), heights=c(1, 4))
+par(mar=rep(0, 4))
+plot.new()
+#text(x=0.5, y=0.5, "Title")
+#wordcloud(x, main="Title")
+
+#pdf(file="wordclouds.pdf", width=6, height=6)
+for(dec in 1:length(sel.decades)){ #dec=1
+  loop.decade <- sel.decades[dec]
+  loop.data <- subset(sliced.top10percomm_nofilter.tr_cols, decade==loop.decade) # sliced.top10percomm_nofilter.tr #sliced.top5percomm.tr
+
+  set.seed(42)
+  wordcloud(words = loop.data$stemmed.term, freq = loop.data$eigen.centrality/2, min.freq = 0,
+          max.words=200, random.order=FALSE, rot.per=0, ordered.colors=TRUE,
+          colors=as.character(loop.data$cust.col.long)
+          ) 
+}  
+
+colorX12comm
+
+plot(x=colorX12comm$community.mmb, y=rep(1,12), col = colorX12comm$cust.col.long, pch = 19, cex=6)
+
+#dev.off()
+```
+
